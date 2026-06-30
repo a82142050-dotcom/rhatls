@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>💕 고무신 배달 대작전 💕</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; overflow: hidden; }
+canvas { border: 3px solid #e94560; border-radius: 8px; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = 800;
+canvas.height = 500;
+
+const WIN_SCORE = 10;
+let state = 'start';
+let score = 0;
+let lives = 3;
+let difficulty = 1;
+let difficultyTimer = 0;
+let highScore = parseInt(localStorage.getItem('gomusin_high2') || '0');
+let winAnimTimer = 0;
+
+const player = { x: 100, y: 380, w: 36, h: 50, vx: 0, vy: 0, hasShoe: false, onGround: true, facing: 1 };
+const boyfriend = { x: 710, y: 375, w: 36, h: 50 };
+
+let shoes = [];
+let shoeTimer = 0;
+let obstacles = [];
+let obstacleTimer = 0;
+let particles = [];
+let hearts = [];
+let confetti = [];
+
+const GROUND_Y = 425;
+const GRAVITY = 0.6;
+
+const keys = {};
+document.addEventListener('keydown', e => { keys[e.key] = true; if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault(); });
+document.addEventListener('keyup', e => keys[e.key] = false);
+
+canvas.addEventListener('click', () => {
+  if (state === 'start') { state = 'playing'; resetGame(); }
+  else if (state === 'gameover' || state === 'win') { state = 'start'; }
+});
+
+function resetGame() {
+  score = 0; lives = 3; difficulty = 1; difficultyTimer = 0; winAnimTimer = 0;
+  player.x = 100; player.y = GROUND_Y - player.h; player.vx = 0; player.vy = 0;
+  player.hasShoe = false; player.onGround = true;
+  shoes = []; obstacles = []; particles = []; hearts = []; confetti = [];
+  shoeTimer = 0; obstacleTimer = 0;
+}
+
+function spawnShoe() {
+  shoes.push({ x: 80 + Math.random() * 520, y: -30, vy: 1.5 + Math.random(), w: 24, h: 20, bounce: 0 });
+}
+
+function spawnObstacle() {
+  const type = Math.random() > 0.5 ? 'grenade' : 'badboy';
+  const fromRight = Math.random() > 0.5;
+  obstacles.push({
+    type,
+    x: fromRight ? 830 : -50,
+    y: GROUND_Y - (type === 'grenade' ? 24 : 50),
+    w: type === 'grenade' ? 24 : 36,
+    h: type === 'grenade' ? 24 : 50,
+    vx: (fromRight ? -1 : 1) * (1.8 + difficulty * 0.4 + Math.random()),
+    hit: false, timer: 0
+  });
+}
+
+function addParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    particles.push({ x, y, vx: (Math.random()-0.5)*5, vy: -Math.random()*4-1, life: 35+Math.random()*20, color, size: 3+Math.random()*4 });
+  }
+}
+
+function spawnConfetti(count) {
+  const colors = ['#FF69B4','#FFD700','#FF6B6B','#87CEEB','#98FB98','#DDA0DD','#FFA07A','#FF1493','#00CED1','#FFB6C1'];
+  for (let i = 0; i < count; i++) {
+    confetti.push({
+      x: Math.random() * canvas.width,
+      y: -20 - Math.random() * 300,
+      vx: (Math.random()-0.5)*2,
+      vy: 1 + Math.random()*2.5,
+      size: 4 + Math.random()*6,
+      color: colors[Math.floor(Math.random()*colors.length)],
+      rot: Math.random()*Math.PI*2,
+      rotV: (Math.random()-0.5)*0.15,
+      type: Math.random() > 0.4 ? 'petal' : 'rect',
+      life: 300 + Math.random()*200
+    });
+  }
+}
+
+function collides(a, b) {
+  return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+}
+
+function drawText(text, x, y, size, color, align='center') {
+  ctx.font = `bold ${size}px 'Malgun Gothic', 'Segoe UI', sans-serif`;
+  ctx.fillStyle = color;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, y);
+}
+
+// ===== ANIME CHARACTER DRAWING =====
+
+function drawGirlfriend(x, y, bob, facing, hasShoe) {
+  ctx.save();
+  ctx.translate(x + 18, y + 25);
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath();
+  ctx.ellipse(0, 25, 14, 4, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Hair (long brown hair)
+  ctx.fillStyle = '#5C3317';
+  ctx.beginPath();
+  ctx.ellipse(0, -14 + bob, 14, 15, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Side hair strands
+  ctx.fillStyle = '#5C3317';
+  ctx.fillRect(-13, -10 + bob, 5, 28);
+  ctx.fillRect(8, -10 + bob, 5, 28);
+  // Hair highlight
+  ctx.fillStyle = '#7B4B2A';
+  ctx.beginPath();
+  ctx.ellipse(-4, -20 + bob, 5, 4, -0.3, 0, Math.PI*2);
+  ctx.fill();
+
+  // Face
+  ctx.fillStyle = '#FFE0BD';
+  ctx.beginPath();
+  ctx.ellipse(0, -12 + bob, 10, 12, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Eyes (big anime eyes)
+  ctx.fillStyle = '#2C1810';
+  ctx.beginPath();
+  ctx.ellipse(-4, -13 + bob, 2.5, 3.5, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(4, -13 + bob, 2.5, 3.5, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Eye highlights
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  ctx.arc(-3, -14.5 + bob, 1.2, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(5, -14.5 + bob, 1.2, 0, Math.PI*2);
+  ctx.fill();
+
+  // Blush
+  ctx.fillStyle = 'rgba(255,150,150,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(-7, -8 + bob, 3, 2, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(7, -8 + bob, 3, 2, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Smile
+  ctx.strokeStyle = '#CC6666';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(0, -8 + bob, 4, 0.1, Math.PI - 0.1);
+  ctx.stroke();
+
+  // Body - pink dress
+  ctx.fillStyle = '#FF69B4';
+  ctx.beginPath();
+  ctx.moveTo(-10, 2 + bob);
+  ctx.lineTo(10, 2 + bob);
+  ctx.lineTo(13, 22);
+  ctx.lineTo(-13, 22);
+  ctx.closePath();
+  ctx.fill();
+
+  // Dress collar
+  ctx.fillStyle = '#FF1493';
+  ctx.beginPath();
+  ctx.moveTo(-6, 1 + bob);
+  ctx.lineTo(0, 5 + bob);
+  ctx.lineTo(6, 1 + bob);
+  ctx.closePath();
+  ctx.fill();
+
+  // Arms
+  ctx.fillStyle = '#FFE0BD';
+  ctx.fillRect(-15, 5 + bob, 6, 14);
+  ctx.fillRect(9, 5 + bob, 6, 14);
+
+  // Legs
+  ctx.fillStyle = '#FFE0BD';
+  ctx.fillRect(-7, 21, 5, 8);
+  ctx.fillRect(2, 21, 5, 8);
+
+  // Shoes
+  ctx.fillStyle = '#FF1493';
+  ctx.fillRect(-8, 27, 7, 4);
+  ctx.fillRect(1, 27, 7, 4);
+
+  // Holding rubber shoe
+  if (hasShoe) {
+    drawRubberShoe(14, 10 + bob, 0.7);
+  }
+
+  ctx.restore();
+}
+
+function drawSoldier(x, y, bob) {
+  ctx.save();
+  ctx.translate(x + 18, y + 25);
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath();
+  ctx.ellipse(0, 27, 14, 4, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Military helmet
+  ctx.fillStyle = '#4A5D23';
+  ctx.beginPath();
+  ctx.ellipse(0, -22 + bob, 14, 10, 0, 0, Math.PI);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(0, -22 + bob, 16, 7, 0, Math.PI, Math.PI*2);
+  ctx.fill();
+  // Helmet band
+  ctx.fillStyle = '#3A4D13';
+  ctx.fillRect(-14, -22 + bob, 28, 3);
+
+  // Face
+  ctx.fillStyle = '#FFE0BD';
+  ctx.beginPath();
+  ctx.ellipse(0, -10 + bob, 10, 12, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Eyes (determined anime eyes)
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath();
+  ctx.ellipse(-4, -12 + bob, 2.2, 3, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(4, -12 + bob, 2.2, 3, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Eye highlights
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  ctx.arc(-3, -13 + bob, 1, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(5, -13 + bob, 1, 0, Math.PI*2);
+  ctx.fill();
+
+  // Eyebrows (thick, masculine)
+  ctx.fillStyle = '#333';
+  ctx.fillRect(-7, -18 + bob, 6, 2);
+  ctx.fillRect(1, -18 + bob, 6, 2);
+
+  // Smile
+  ctx.strokeStyle = '#AA5555';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(0, -6 + bob, 3.5, 0.2, Math.PI - 0.2);
+  ctx.stroke();
+
+  // Body - military uniform
+  ctx.fillStyle = '#556B2F';
+  ctx.fillRect(-11, 3 + bob, 22, 20);
+
+  // Uniform details - pockets
+  ctx.fillStyle = '#4A5D23';
+  ctx.fillRect(-8, 8 + bob, 7, 5);
+  ctx.fillRect(1, 8 + bob, 7, 5);
+
+  // Belt
+  ctx.fillStyle = '#333';
+  ctx.fillRect(-11, 16 + bob, 22, 3);
+  ctx.fillStyle = '#FFD700';
+  ctx.fillRect(-2, 16 + bob, 4, 3);
+
+  // Arms
+  ctx.fillStyle = '#556B2F';
+  ctx.fillRect(-16, 5 + bob, 6, 14);
+  ctx.fillRect(10, 5 + bob, 6, 14);
+  // Hands
+  ctx.fillStyle = '#FFE0BD';
+  ctx.fillRect(-15, 17 + bob, 5, 5);
+  ctx.fillRect(10, 17 + bob, 5, 5);
+
+  // Legs - military pants
+  ctx.fillStyle = '#4A5D23';
+  ctx.fillRect(-8, 23, 7, 10);
+  ctx.fillRect(1, 23, 7, 10);
+
+  // Combat boots
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(-9, 31, 8, 5);
+  ctx.fillRect(1, 31, 8, 5);
+
+  // Name tag
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(-14, 38, 28, 14);
+  ctx.fillStyle = '#98FB98';
+  ctx.font = 'bold 10px "Malgun Gothic", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('진우', 0, 45);
+
+  ctx.restore();
+}
+
+function drawBadBoy(x, y, bob) {
+  ctx.save();
+  ctx.translate(x + 18, y + 25);
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.beginPath();
+  ctx.ellipse(0, 27, 12, 3, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Slick hair
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath();
+  ctx.ellipse(0, -16 + bob, 12, 12, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Hair swoop
+  ctx.beginPath();
+  ctx.moveTo(-8, -24 + bob);
+  ctx.quadraticCurveTo(2, -32 + bob, 12, -22 + bob);
+  ctx.quadraticCurveTo(8, -26 + bob, -2, -24 + bob);
+  ctx.fill();
+
+  // Face
+  ctx.fillStyle = '#FFE0BD';
+  ctx.beginPath();
+  ctx.ellipse(0, -10 + bob, 9, 11, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Smirking eyes
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath();
+  ctx.ellipse(-4, -12 + bob, 2, 2.5, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(4, -12 + bob, 2, 2.5, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Wink (one eye smaller)
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  ctx.arc(-3, -13 + bob, 0.8, 0, Math.PI*2);
+  ctx.fill();
+
+  // Smirk
+  ctx.strokeStyle = '#CC5555';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(2, -6 + bob, 4, -0.2, Math.PI * 0.6);
+  ctx.stroke();
+
+  // Sunglasses on head
+  ctx.fillStyle = '#333';
+  ctx.fillRect(-8, -20 + bob, 16, 2);
+
+  // Body - flashy jacket
+  ctx.fillStyle = '#222';
+  ctx.fillRect(-10, 3 + bob, 20, 18);
+  // Red shirt underneath
+  ctx.fillStyle = '#CC2222';
+  ctx.beginPath();
+  ctx.moveTo(-5, 3 + bob);
+  ctx.lineTo(5, 3 + bob);
+  ctx.lineTo(3, 12 + bob);
+  ctx.lineTo(-3, 12 + bob);
+  ctx.closePath();
+  ctx.fill();
+  // Gold chain
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(0, 8 + bob, 5, 0.3, Math.PI - 0.3);
+  ctx.stroke();
+
+  // Arms
+  ctx.fillStyle = '#222';
+  ctx.fillRect(-14, 5 + bob, 5, 12);
+  ctx.fillRect(9, 5 + bob, 5, 12);
+
+  // Legs - tight jeans
+  ctx.fillStyle = '#2a2a4a';
+  ctx.fillRect(-7, 21, 6, 10);
+  ctx.fillRect(1, 21, 6, 10);
+
+  // Shoes
+  ctx.fillStyle = '#111';
+  ctx.fillRect(-8, 29, 7, 4);
+  ctx.fillRect(1, 29, 7, 4);
+
+  // Heart bubbles above when moving
+  if (Math.random() > 0.92) {
+    ctx.fillStyle = '#FF69B4';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('♥', Math.random()*20-10, -30 + bob);
+  }
+
+  ctx.restore();
+}
+
+function drawGrenade(x, y) {
+  ctx.save();
+  ctx.translate(x + 12, y + 12);
+
+  // Body
+  ctx.fillStyle = '#3a5a2a';
+  ctx.beginPath();
+  ctx.roundRect(-8, -4, 16, 18, 3);
+  ctx.fill();
+
+  // Grid pattern
+  ctx.strokeStyle = '#2a4a1a';
+  ctx.lineWidth = 0.8;
+  for (let i = -6; i <= 6; i += 4) {
+    ctx.beginPath(); ctx.moveTo(i, -2); ctx.lineTo(i, 12); ctx.stroke();
+  }
+  for (let j = 0; j <= 12; j += 4) {
+    ctx.beginPath(); ctx.moveTo(-7, j); ctx.lineTo(7, j); ctx.stroke();
+  }
+
+  // Top handle
+  ctx.fillStyle = '#555';
+  ctx.fillRect(-3, -10, 6, 8);
+
+  // Pin
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.arc(5, -8, 2.5, 0, Math.PI*2);
+  ctx.stroke();
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(5, -8);
+  ctx.lineTo(10, -12);
+  ctx.stroke();
+
+  // Danger glow
+  const glow = Math.sin(Date.now()/150) * 0.3 + 0.3;
+  ctx.fillStyle = `rgba(255,80,0,${glow})`;
+  ctx.beginPath();
+  ctx.arc(0, 6, 12, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawRubberShoe(x, y, scale) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(scale || 1, scale || 1);
+
+  // Sole
+  ctx.fillStyle = '#8B4513';
+  ctx.beginPath();
+  ctx.ellipse(0, 8, 14, 4, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Shoe body
+  ctx.fillStyle = '#FF6B9D';
+  ctx.beginPath();
+  ctx.moveTo(-12, 6);
+  ctx.quadraticCurveTo(-14, -6, -6, -10);
+  ctx.quadraticCurveTo(0, -14, 8, -10);
+  ctx.quadraticCurveTo(14, -6, 14, 4);
+  ctx.lineTo(14, 6);
+  ctx.quadraticCurveTo(0, 12, -12, 6);
+  ctx.fill();
+
+  // Shoe opening
+  ctx.fillStyle = '#333';
+  ctx.beginPath();
+  ctx.ellipse(2, -4, 6, 4, 0.2, 0, Math.PI*2);
+  ctx.fill();
+
+  // Highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(-4, -6, 5, 3, -0.3, 0, Math.PI*2);
+  ctx.fill();
+
+  // Sparkle
+  if (Math.random() > 0.85) {
+    ctx.fillStyle = '#FFD700';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('✦', Math.random()*16-8, -14);
+  }
+
+  ctx.restore();
+}
+
+function drawCloud(x, y, s) {
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.beginPath();
+  ctx.arc(x, y, 15*s, 0, Math.PI*2);
+  ctx.arc(x+12*s, y-6*s, 12*s, 0, Math.PI*2);
+  ctx.arc(x+24*s, y, 14*s, 0, Math.PI*2);
+  ctx.arc(x+10*s, y+4*s, 10*s, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawBackground() {
+  // Sky
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, '#4A90D9');
+  grad.addColorStop(0.5, '#87CEEB');
+  grad.addColorStop(0.85, '#C9D6DF');
+  grad.addColorStop(1, '#888');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Sun
+  ctx.fillStyle = '#FFE87C';
+  ctx.beginPath();
+  ctx.arc(680, 60, 25, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,232,124,0.2)';
+  ctx.beginPath();
+  ctx.arc(680, 60, 40, 0, Math.PI*2);
+  ctx.fill();
+
+  // Clouds
+  drawCloud(60, 55, 1.2);
+  drawCloud(280, 40, 0.9);
+  drawCloud(500, 65, 1.0);
+
+  // City buildings (back)
+  const bColors = ['#5C6B7A','#6B7A8C','#4D5C6B','#7A8A9C','#556677'];
+  const buildings = [[15,220,55],[75,185,42],[130,245,58],[200,200,48],[260,235,52],[330,175,42],[385,225,50],[445,195,45],[500,250,55],[560,210,48]];
+  buildings.forEach(([bx,by,bw],i) => {
+    ctx.fillStyle = bColors[i % bColors.length];
+    ctx.fillRect(bx, by, bw, GROUND_Y - by);
+    // Windows
+    ctx.fillStyle = '#FFE87C';
+    for (let wy = by+12; wy < GROUND_Y - 15; wy += 22) {
+      for (let wx = bx+6; wx < bx+bw-8; wx += 14) {
+        if (Math.sin(wx*13+wy*7+i) > -0.3) {
+          ctx.globalAlpha = 0.6 + Math.sin(wx+wy)*0.3;
+          ctx.fillRect(wx, wy, 6, 9);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  });
+
+  // Military base (right)
+  ctx.fillStyle = '#556B2F';
+  ctx.fillRect(630, 300, 170, GROUND_Y - 300);
+  ctx.fillStyle = '#4A5D23';
+  ctx.fillRect(630, 300, 170, 8);
+
+  // Gate posts
+  ctx.fillStyle = '#8B7355';
+  ctx.fillRect(618, 315, 14, GROUND_Y - 315);
+  ctx.fillRect(618, 312, 60, 8);
+
+  // Gate sign
+  ctx.fillStyle = '#333';
+  ctx.fillRect(625, 318, 48, 16);
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 10px "Malgun Gothic", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('육군부대', 649, 326);
+
+  // Barbed wire
+  ctx.strokeStyle = '#777';
+  ctx.lineWidth = 1.5;
+  for (let i = 635; i < 800; i += 12) {
+    ctx.beginPath();
+    ctx.arc(i, 298, 4, 0, Math.PI*2);
+    ctx.stroke();
+  }
+
+  // Flag
+  ctx.fillStyle = '#8B4513';
+  ctx.fillRect(780, 270, 4, GROUND_Y - 270);
+  // Korean flag
+  ctx.fillStyle = 'white';
+  ctx.fillRect(784, 275, 20, 14);
+  ctx.fillStyle = '#C60C30';
+  ctx.beginPath();
+  ctx.arc(794, 282, 4, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#003478';
+  ctx.beginPath();
+  ctx.arc(794, 282, 4, Math.PI, Math.PI*2);
+  ctx.fill();
+
+  // Ground - road
+  ctx.fillStyle = '#555';
+  ctx.fillRect(0, GROUND_Y, canvas.width, 80);
+  ctx.fillStyle = '#FFD700';
+  for (let i = 0; i < 800; i += 55) ctx.fillRect(i, GROUND_Y + 30, 25, 3);
+  ctx.fillStyle = '#888';
+  ctx.fillRect(0, GROUND_Y, canvas.width, 5);
+
+  // Sidewalk texture
+  ctx.fillStyle = '#aaa';
+  for (let i = 0; i < 800; i += 40) {
+    ctx.strokeStyle = '#999';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(i, GROUND_Y); ctx.lineTo(i, GROUND_Y+5);
+    ctx.stroke();
+  }
+}
+
+function drawHUD() {
+  // Score bar
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(10, 8, 210, 38);
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(10, 8, 210, 38);
+  // Progress bar
+  ctx.fillStyle = 'rgba(255,105,180,0.3)';
+  ctx.fillRect(14, 32, 202, 10);
+  ctx.fillStyle = '#FF69B4';
+  ctx.fillRect(14, 32, (score/WIN_SCORE)*202, 10);
+  drawText(`점수: ${score} / ${WIN_SCORE}`, 115, 22, 15, '#FFD700');
+
+  // Lives
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(600, 8, 190, 38);
+  ctx.strokeStyle = '#FF6B6B';
+  ctx.strokeRect(600, 8, 190, 38);
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = i < lives ? '#FF4466' : '#444';
+    const hx = 650 + i*40;
+    // Draw heart shape
+    ctx.beginPath();
+    ctx.moveTo(hx, 30);
+    ctx.bezierCurveTo(hx, 22, hx-10, 18, hx-10, 24);
+    ctx.bezierCurveTo(hx-10, 28, hx, 34, hx, 36);
+    ctx.bezierCurveTo(hx, 34, hx+10, 28, hx+10, 24);
+    ctx.bezierCurveTo(hx+10, 18, hx, 22, hx, 30);
+    ctx.fill();
+  }
+
+  drawText(`Lv.${Math.floor(difficulty)}`, 400, 22, 14, 'rgba(255,255,255,0.6)');
+
+  if (player.hasShoe) {
+    ctx.fillStyle = 'rgba(255,105,180,0.25)';
+    const pw = 320;
+    ctx.fillRect(400-pw/2, 50, pw, 22);
+    drawText('고무신 GET! → 진우에게 가져가자!', 400, 61, 13, '#FF69B4');
+  }
+}
+
+function drawThoughtBubble(x, y) {
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.beginPath();
+  ctx.ellipse(x, y, 18, 14, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x+10, y+14, 4, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x+14, y+20, 2.5, 0, Math.PI*2);
+  ctx.fill();
+  drawRubberShoe(x, y, 0.45);
+}
+
+function update() {
+  if (state !== 'playing') {
+    // Update confetti in win state
+    if (state === 'win') {
+      winAnimTimer++;
+      if (winAnimTimer % 3 === 0 && confetti.length < 250) spawnConfetti(4);
+      for (let i = confetti.length-1; i >= 0; i--) {
+        const c = confetti[i];
+        c.x += c.vx + Math.sin(c.rot)*0.5;
+        c.y += c.vy;
+        c.rot += c.rotV;
+        c.life--;
+        if (c.life <= 0 || c.y > canvas.height + 20) confetti.splice(i, 1);
+      }
+    }
+    return;
+  }
+
+  difficultyTimer++;
+  if (difficultyTimer % 500 === 0) difficulty += 0.35;
+
+  const speed = 4.2;
+  if (keys['ArrowLeft'] || keys['a']) { player.x -= speed; player.facing = -1; }
+  if (keys['ArrowRight'] || keys['d']) { player.x += speed; player.facing = 1; }
+  if ((keys['ArrowUp'] || keys['w'] || keys[' ']) && player.onGround) {
+    player.vy = -11;
+    player.onGround = false;
+  }
+
+  player.vy += GRAVITY;
+  player.y += player.vy;
+  if (player.y >= GROUND_Y - player.h) {
+    player.y = GROUND_Y - player.h;
+    player.vy = 0;
+    player.onGround = true;
+  }
+  player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+
+  shoeTimer++;
+  if (shoeTimer > 110 - difficulty * 5) {
+    if (shoes.length < 3 && !player.hasShoe) spawnShoe();
+    shoeTimer = 0;
+  }
+
+  for (let i = shoes.length-1; i >= 0; i--) {
+    const s = shoes[i];
+    s.y += s.vy;
+    if (s.y > GROUND_Y - s.h - 5) { s.y = GROUND_Y - s.h - 5; s.vy = 0; s.bounce++; }
+    if (!player.hasShoe && collides(player, s)) {
+      player.hasShoe = true;
+      shoes.splice(i, 1);
+      addParticles(player.x+18, player.y+20, '#FFD700', 8);
+      addParticles(player.x+18, player.y+20, '#FF69B4', 5);
+      continue;
+    }
+    if (s.bounce > 0) { s.bounce++; if (s.bounce > 350) shoes.splice(i, 1); }
+  }
+
+  if (player.hasShoe && collides(player, boyfriend)) {
+    score++;
+    player.hasShoe = false;
+    addParticles(boyfriend.x+18, boyfriend.y, '#FF69B4', 12);
+    addParticles(boyfriend.x+18, boyfriend.y, '#FFD700', 8);
+    hearts.push({ x: boyfriend.x+18, y: boyfriend.y-10, vy: -1.5, life: 60, size: 1 });
+    if (score > highScore) { highScore = score; localStorage.setItem('gomusin_high2', highScore); }
+    if (score >= WIN_SCORE) { state = 'win'; winAnimTimer = 0; spawnConfetti(80); }
+  }
+
+  obstacleTimer++;
+  const spawnRate = Math.max(55, 140 - difficulty * 15);
+  if (obstacleTimer > spawnRate) { spawnObstacle(); obstacleTimer = 0; }
+
+  for (let i = obstacles.length-1; i >= 0; i--) {
+    const o = obstacles[i];
+    o.x += o.vx;
+    o.timer++;
+    if (o.x < -60 || o.x > 860) { obstacles.splice(i, 1); continue; }
+    if (!o.hit && collides(player, o)) {
+      o.hit = true;
+      lives--;
+      addParticles(player.x+18, player.y+20, o.type === 'grenade' ? '#FF4400' : '#FF0066', 12);
+      player.x = 100; player.y = GROUND_Y - player.h;
+      player.hasShoe = false;
+      if (lives <= 0) state = 'gameover';
+    }
+  }
+
+  for (let i = particles.length-1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+  for (let i = hearts.length-1; i >= 0; i--) {
+    const h = hearts[i];
+    h.y += h.vy; h.life--; h.size = Math.min(h.size + 0.05, 1.5);
+    if (h.life <= 0) hearts.splice(i, 1);
+  }
+}
+
+function drawHeartShape(x, y, size, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, y + size*3);
+  ctx.bezierCurveTo(x, y, x - size*5, y - size*2, x, y - size*5);
+  ctx.bezierCurveTo(x + size*5, y - size*2, x, y, x, y + size*3);
+  ctx.fill();
+}
+
+function draw() {
+  drawBackground();
+
+  if (state === 'start') {
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Title characters
+    drawGirlfriend(340, 70, 0, 1, true);
+    drawSoldier(420, 70, 0);
+
+    // Heart between them
+    drawHeartShape(408, 80, 3, '#FF69B4');
+
+    drawText('고무신 배달 대작전', 400, 175, 34, '#FF69B4');
+    drawText('여자친구가 군인 남자친구 진우에게', 400, 210, 15, '#FFB6C1');
+    drawText('고무신을 가져다주세요!', 400, 232, 15, '#FFB6C1');
+
+    drawText('🎮 조작법', 400, 272, 17, '#FFD700');
+    drawText('← → : 이동  |  ↑ / 스페이스 : 점프', 400, 298, 14, 'white');
+    drawText('고무신을 주워서 진우에게 전달!', 400, 325, 13, '#98FB98');
+    drawText('💣 수류탄과 유혹남 조심! 라이프 3개!', 400, 350, 13, '#FF6B6B');
+    drawText(`🎯 ${WIN_SCORE}점 달성하면 게임 클리어!`, 400, 378, 14, '#87CEFA');
+
+    const pulse = Math.sin(Date.now()/300) * 0.3 + 0.7;
+    ctx.globalAlpha = pulse;
+    drawText('클릭하여 시작!', 400, 425, 22, '#FFD700');
+    ctx.globalAlpha = 1;
+    drawText(`최고점수: ${highScore}`, 400, 460, 13, '#DDA0DD');
+    return;
+  }
+
+  if (state === 'win') {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Confetti / flower petals
+    confetti.forEach(c => {
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      ctx.rotate(c.rot);
+      ctx.globalAlpha = Math.min(1, c.life / 50);
+      if (c.type === 'petal') {
+        // Flower petal shape
+        ctx.fillStyle = c.color;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, c.size * 0.6, c.size, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.beginPath();
+        ctx.ellipse(-c.size*0.15, -c.size*0.3, c.size*0.25, c.size*0.4, 0, 0, Math.PI*2);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = c.color;
+        ctx.fillRect(-c.size/2, -c.size/4, c.size, c.size/2);
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+
+    // Couple illustration
+    drawGirlfriend(350, 110, Math.sin(Date.now()/400)*2, 1, false);
+    drawSoldier(410, 110, Math.sin(Date.now()/400)*2);
+    drawHeartShape(400, 100, 4, '#FF1493');
+
+    const colors = ['#FF69B4', '#FF1493', '#FFB6C1', '#FF69B4'];
+    const ci = Math.floor(Date.now()/300) % colors.length;
+
+    drawText('🎊 게임 클리어! 🎊', 400, 230, 32, colors[ci]);
+
+    const a1 = Math.min(1, winAnimTimer / 60);
+    ctx.globalAlpha = a1;
+    drawText('우리 사랑 영원해~ 💕', 400, 280, 28, '#FF69B4');
+    ctx.globalAlpha = 1;
+
+    const a2 = Math.min(1, Math.max(0, (winAnimTimer - 50) / 60));
+    ctx.globalAlpha = a2;
+    drawText('진우야 축하해 ㅋㅋ 🎉', 400, 325, 26, '#FFD700');
+    ctx.globalAlpha = 1;
+
+    const a3 = Math.min(1, Math.max(0, (winAnimTimer - 100) / 60));
+    ctx.globalAlpha = a3;
+    drawText(`최종 점수: ${score} | 최고점수: ${highScore}`, 400, 370, 15, '#DDA0DD');
+    ctx.globalAlpha = 1;
+
+    if (winAnimTimer > 140) {
+      const pulse = Math.sin(Date.now()/300) * 0.3 + 0.7;
+      ctx.globalAlpha = pulse;
+      drawText('클릭하여 다시 시작!', 400, 430, 18, '#FFD700');
+      ctx.globalAlpha = 1;
+    }
+    return;
+  }
+
+  if (state === 'gameover') {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    drawGirlfriend(380, 60, 0, 1, false);
+    drawText('게임 오버', 400, 155, 38, '#FF6B6B');
+    drawText(`최종 점수: ${score} / ${WIN_SCORE}`, 400, 200, 24, '#FFD700');
+    drawText(`최고점수: ${highScore}`, 400, 235, 18, '#DDA0DD');
+    drawText('진우가 기다리고 있어! 다시 도전!', 400, 290, 17, '#87CEEB');
+
+    const pulse = Math.sin(Date.now()/300) * 0.3 + 0.7;
+    ctx.globalAlpha = pulse;
+    drawText('클릭하여 다시 시작!', 400, 370, 20, '#FFD700');
+    ctx.globalAlpha = 1;
+    return;
+  }
+
+  // === GAME PLAY DRAWING ===
+
+  // Shoes
+  shoes.forEach(s => {
+    drawRubberShoe(s.x + s.w/2, s.y + s.h/2, 0.85);
+  });
+
+  // Obstacles
+  obstacles.forEach(o => {
+    if (o.type === 'grenade') {
+      drawGrenade(o.x, o.y);
+    } else {
+      const bob = Math.sin(Date.now()/200 + o.x) * 2;
+      drawBadBoy(o.x - 10, o.y - 25 + bob, bob);
+    }
+  });
+
+  // Boyfriend
+  const bfBob = Math.sin(Date.now()/500) * 2;
+  drawSoldier(boyfriend.x - 2, boyfriend.y - 2, bfBob);
+
+  if (!player.hasShoe) {
+    const bubbleAlpha = Math.sin(Date.now()/800) * 0.3 + 0.7;
+    ctx.globalAlpha = bubbleAlpha;
+    drawThoughtBubble(boyfriend.x - 10, boyfriend.y - 20);
+    ctx.globalAlpha = 1;
+  }
+
+  // Player
+  const plBob = player.onGround ? Math.sin(Date.now()/250) * 1.5 : 0;
+  drawGirlfriend(player.x, player.y, plBob, player.facing, player.hasShoe);
+
+  // Dust when running
+  if ((keys['ArrowLeft'] || keys['ArrowRight'] || keys['a'] || keys['d']) && player.onGround) {
+    if (Math.random() > 0.7) addParticles(player.x + 18, player.y + 48, '#aaa', 1);
+  }
+
+  // Particles
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life / 55;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  });
+
+  // Hearts
+  hearts.forEach(h => {
+    ctx.globalAlpha = h.life / 60;
+    drawHeartShape(h.x, h.y, h.size * 2.5, '#FF69B4');
+    ctx.globalAlpha = 1;
+  });
+
+  drawHUD();
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
